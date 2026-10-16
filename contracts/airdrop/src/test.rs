@@ -374,3 +374,31 @@ fn test_leaf_hash_known_vector() {
         "Rust leaf_hash does not match TypeScript SDK output — the two implementations disagree"
     );
 }
+
+// ─── Issue 104: set_active / reclaim before initialize ─────────────────────
+
+/// Calling `set_active` on a fresh, uninitialised contract must return
+/// `AirdropError::NotInitialized`.
+#[test]
+fn test_set_active_before_initialize_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AirdropContract, ());
+    let client = AirdropContractClient::new(&env, &contract_id);
+
+    let result = client.try_set_active(&false);
+    assert_eq!(result, Err(Ok(AirdropError::NotInitialized)));
+}
+
+/// Calling `reclaim` on a fresh, uninitialised contract must return
+/// `AirdropError::NotInitialized`.
+#[test]
+fn test_reclaim_before_initialize_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AirdropContract, ());
+    let client = AirdropContractClient::new(&env, &contract_id);
+
+    let result = client.try_reclaim();
+    assert_eq!(result, Err(Ok(AirdropError::NotInitialized)));
+}
