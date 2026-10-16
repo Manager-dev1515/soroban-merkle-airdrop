@@ -3,6 +3,9 @@
  *
  * Submit a claim transaction for a given address using the Merkle proof
  * from the generated tree JSON.
+ *
+ * With --verify-only the proof is verified locally and against the on-chain
+ * root without submitting any transaction. No secret key is required.
  */
 
 import { Command } from "commander";
@@ -10,7 +13,12 @@ import { readFile } from "fs/promises";
 import { resolve } from "path";
 import chalk from "chalk";
 import ora from "ora";
-import { createAirdropClient, verifyProof, NETWORKS } from "@soroban-merkle-airdrop/sdk";
+import {
+  createAirdropClient,
+  verifyProof,
+  NETWORKS,
+  validateMerkleTreeFile,
+} from "@soroban-merkle-airdrop/sdk";
 import { translateContractError } from "../errors.js";
 
 export const claimCommand = new Command("claim")
@@ -18,25 +26,38 @@ export const claimCommand = new Command("claim")
   .requiredOption("-t, --tree <file>", "Merkle tree JSON (output of generate)")
   .requiredOption("-a, --address <address>", "Address to claim for")
   .option("-k, --secret-key <key>", "Stellar secret key (or set STELLAR_SECRET_KEY)")
+  .option("--verify-only", "Verify proof locally and on-chain without submitting a transaction")
   .action(async (opts, cmd) => {
     const globalOpts = cmd.parent?.opts() ?? {};
     const network = globalOpts.network ?? "testnet";
     const contractId = globalOpts.contractId ?? process.env.AIRDROP_CONTRACT_ID;
     const secretKey = opts.secretKey ?? process.env.STELLAR_SECRET_KEY;
+    const verifyOnly: boolean = opts.verifyOnly ?? false;
 
     if (!contractId) {
       console.error(chalk.red("Error: --contract-id or AIRDROP_CONTRACT_ID required"));
       process.exit(1);
     }
-    if (!secretKey) {
-      console.error(chalk.red("Error: --secret-key or STELLAR_SECRET_KEY required"));
+
+    if (!verifyOnly && !secretKey) {
+      console.error(chalk.red("Error: --secret-key or STELLAR_SECRET_KEY required (omit with --verify-only)"));
       process.exit(1);
     }
 
     const spinner = ora("Loading Merkle tree...").start();
     try {
-      const raw = JSON.parse(await readFile(resolve(opts.tree), "utf-8"));
-      const entry = raw.proofs[opts.address];
+      // Parse and validate the tree file schema.
+      let raw: unknown;
+      try {
+        raw = JSON.parse(await readFile(resolve(opts.tree), "utf-8"));
+      } catch (parseErr) {
+        spinner.fail(chalk.red(`Could not read/parse tree file: ${(parseErr as Error).message}`));
+        process.exit(1);
+      }
+
+      const tree = validateMerkleTreeFile(raw);
+
+      const entry = tree.proofs[opts.address];
       if (!entry) {
         spinner.fail(chalk.red(`Address ${opts.address} not found in airdrop list`));
         process.exit(1);
@@ -44,6 +65,7 @@ export const claimCommand = new Command("claim")
 
       const proof = { ...entry, amount: BigInt(entry.amount) };
 
+      // ── Local proof verification ───────────────────────────────────────────
       spinner.text = "Verifying proof locally...";
       const valid = verifyProof(raw.root, contractId, proof.address, proof.amount, proof.proof);
       if (!valid) {
@@ -59,9 +81,43 @@ export const claimCommand = new Command("claim")
         contractId,
       });
 
+      // ── Already claimed check ──────────────────────────────────────────────
       spinner.text = "Checking claim status...";
-      const already = await client.isClaimed(opts.address);
-      if (already) {
+      const alreadyClaimed = await client.isClaimed(opts.address);
+
+      if (verifyOnly) {
+        spinner.stop();
+
+        // Proof validity
+        if (locallyValid && rootMatches) {
+          console.log(chalk.green(`✔  Proof is valid`) + chalk.gray(` (matches on-chain root: ${tree.root})`));
+        } else if (locallyValid && !rootMatches) {
+          console.log(
+            chalk.yellow(`⚠  Proof is locally valid but the on-chain root differs.`) +
+            `\n   File root:     ${chalk.cyan(tree.root)}` +
+            `\n   On-chain root: ${chalk.cyan(onChainRoot ?? "(none)")}`
+          );
+        } else {
+          console.log(chalk.red(`✖  Proof is INVALID`));
+        }
+
+        // Claimed status
+        if (alreadyClaimed) {
+          console.log(chalk.yellow(`ℹ  ${opts.address} has already claimed.`));
+        } else {
+          console.log(chalk.green(`ℹ  ${opts.address} has NOT yet claimed.`));
+        }
+
+        process.exit(locallyValid && rootMatches ? 0 : 1);
+      }
+
+      // ── Full claim flow ────────────────────────────────────────────────────
+      if (!locallyValid) {
+        spinner.fail(chalk.red("Proof verification failed — tree may be corrupted"));
+        process.exit(1);
+      }
+
+      if (alreadyClaimed) {
         spinner.warn(chalk.yellow(`${opts.address} has already claimed.`));
         process.exit(0);
       }
