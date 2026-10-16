@@ -1666,3 +1666,33 @@ fn test_remaining_balance_zero_after_reclaim() {
 
     assert_eq!(client.remaining_balance(), 0, "balance after reclaim");
 }
+
+// ─── Issue #104: set_active / reclaim before initialize ────────────────────
+
+/// Calling `set_active` on a fresh, uninitialised contract must return
+/// `AirdropError::NotInitialized` without emitting any events.
+#[test]
+fn test_set_active_before_initialize_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AirdropContract, ());
+    let client = AirdropContractClient::new(&env, &contract_id);
+
+    // No initialize call — contract storage is empty.
+    let result = client.try_set_active(&false);
+    assert_eq!(result, Err(Ok(AirdropError::NotInitialized)));
+}
+
+/// Calling `reclaim` on a fresh, uninitialised contract must return
+/// `AirdropError::NotInitialized`.
+#[test]
+fn test_reclaim_before_initialize_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AirdropContract, ());
+    let client = AirdropContractClient::new(&env, &contract_id);
+
+    // No initialize call — contract storage is empty.
+    let result = client.try_reclaim();
+    assert_eq!(result, Err(Ok(AirdropError::NotInitialized)));
+}
