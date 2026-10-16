@@ -31,6 +31,18 @@ export const claimCommand = new Command("claim")
     const globalOpts = cmd.parent?.opts() ?? {};
     const network = globalOpts.network ?? "testnet";
     const contractId = globalOpts.contractId ?? process.env.AIRDROP_CONTRACT_ID;
+
+    // Warn if the secret key was supplied as a CLI argument — it will be
+    // visible in shell history and process listings (e.g. `ps aux`).
+    if (opts.secretKey) {
+      console.warn(
+        chalk.yellow(
+          "Warning: passing secret keys as command-line arguments is insecure. " +
+          "Use STELLAR_SECRET_KEY env var instead."
+        )
+      );
+    }
+
     const secretKey = opts.secretKey ?? process.env.STELLAR_SECRET_KEY;
     const verifyOnly: boolean = opts.verifyOnly ?? false;
 
