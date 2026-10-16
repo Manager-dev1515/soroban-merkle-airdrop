@@ -914,3 +914,70 @@ fn test_verify_proof_all_same_hash_returns_false() {
         "all-same-hash proof against a real root must return false"
     );
 }
+
+// ─── Issue #135: overflow-safe amount arithmetic ─────────────────────────────
+
+/// leaf_hash with amount = i128::MAX must not panic.
+///
+/// amount.to_be_bytes() is always safe (it's a byte conversion, not arithmetic),
+/// so this test documents and verifies that the leaf_hash implementation is
+/// safe at the extremes of the i128 range.
+#[test]
+fn test_leaf_hash_i128_max_no_panic() {
+    let env = Env::default();
+    let addr = Address::generate(&env);
+    // Must complete without panicking — no arithmetic overflow is possible here.
+    let _leaf = merkle::leaf_hash(&env, &addr, i128::MAX);
+}
+
+/// initialize with total_amount = i128::MAX — documents expected behaviour.
+///
+/// With overflow-checks = true in the release profile, any arithmetic overflow
+/// would panic. This test verifies that storing and reading back i128::MAX
+/// from instance storage does not cause overflow. The token transfer will
+/// succeed in mock mode regardless of amount.
+#[test]
+fn test_initialize_i128_max_total_amount() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, i128::MAX, &admin, 500);
+    mint(&env, &token, &admin, &admin, i128::MAX);
+
+    // Must not panic — storing and reading i128::MAX is safe.
+    client.initialize(&admin, &token, &root, &i128::MAX, &DEFAULT_EXPIRATION);
+
+    assert_eq!(client.total_deposited(), i128::MAX);
+}
+
+/// claim with amount = i128::MAX in a single-leaf tree does not overflow.
+///
+/// leaf_hash uses `amount.to_be_bytes()` (always safe) and the transfer
+/// passes i128::MAX directly to the token client. No arithmetic is performed
+/// on the amount itself inside the contract, so there is no overflow risk —
+/// this test documents and verifies that property.
+#[test]
+fn test_claim_i128_max_no_overflow() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    // Single-leaf tree: root == leaf (empty proof is valid when root == leaf).
+    let leaf = merkle::leaf_hash(&env, &claimant, i128::MAX);
+    let empty_proof: Vec<BytesN<32>> = Vec::new(&env);
+
+    mint(&env, &token, &admin, &admin, i128::MAX);
+    // Use the leaf directly as the root — single-node tree.
+    client.initialize(&admin, &token, &leaf, &i128::MAX, &DEFAULT_EXPIRATION);
+
+    // Must not overflow or panic.
+    client.claim(&claimant, &i128::MAX, &empty_proof);
+
+    assert_eq!(
+        TokenClient::new(&env, &token).balance(&claimant),
+        i128::MAX,
+        "claimant must receive i128::MAX tokens"
+    );
+    assert!(client.is_claimed(&claimant));
+}
