@@ -7,15 +7,11 @@ export const metadata: Metadata = {
   description: "Claim your token allocation from this Merkle airdrop on Stellar.",
 };
 
-// FOUC-prevention: runs synchronously before first paint so the correct
-// data-theme is set before any CSS is rendered. Must be a plain string
-// (not JSX) so Next.js renders it as an inline blocking script.
+// FOUC-prevention script: runs synchronously before the first paint so the
+// correct data-theme is applied before any CSS is rendered.
 const themeScript = `(function(){
-  try {
-    var t = localStorage.getItem('theme') ||
-      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    document.documentElement.setAttribute('data-theme', t);
-  } catch(e) {}
+  var theme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  document.documentElement.setAttribute('data-theme', theme);
 })();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
