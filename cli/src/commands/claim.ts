@@ -31,6 +31,18 @@ export const claimCommand = new Command("claim")
     const globalOpts = cmd.parent?.opts() ?? {};
     const network = globalOpts.network ?? "testnet";
     const contractId = globalOpts.contractId ?? process.env.AIRDROP_CONTRACT_ID;
+
+    // Warn if the secret key was supplied as a CLI argument — it will be
+    // visible in shell history and process listings (e.g. `ps aux`).
+    if (opts.secretKey) {
+      console.warn(
+        chalk.yellow(
+          "Warning: passing secret keys as command-line arguments is insecure. " +
+          "Use STELLAR_SECRET_KEY env var instead."
+        )
+      );
+    }
+
     const secretKey = opts.secretKey ?? process.env.STELLAR_SECRET_KEY;
     const verifyOnly: boolean = opts.verifyOnly ?? false;
 
@@ -67,15 +79,19 @@ export const claimCommand = new Command("claim")
 
       // ── Local proof verification ───────────────────────────────────────────
       spinner.text = "Verifying proof locally...";
-      const locallyValid = verifyProof(tree.root, proof.address, proof.amount, proof.proof);
+      const valid = verifyProof(raw.root, contractId, proof.address, proof.amount, proof.proof);
+      if (!valid) {
+        spinner.fail(chalk.red("Proof verification failed — tree may be corrupted"));
+        process.exit(1);
+      }
 
       const preset = NETWORKS[network];
-      const client = createAirdropClient({ ...preset, contractId });
-
-      // ── On-chain root check ────────────────────────────────────────────────
-      spinner.text = "Fetching on-chain Merkle root...";
-      const onChainRoot = await client.merkleRoot();
-      const rootMatches = onChainRoot === tree.root;
+      const client = createAirdropClient({
+        ...preset,
+        // Override rpcUrl if --rpc-url was provided on the global options.
+        ...(globalOpts.rpcUrl ? { rpcUrl: globalOpts.rpcUrl } : {}),
+        contractId,
+      });
 
       // ── Already claimed check ──────────────────────────────────────────────
       spinner.text = "Checking claim status...";
