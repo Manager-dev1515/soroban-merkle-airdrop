@@ -231,6 +231,12 @@ STELLAR_SECRET_KEY=S... ts-node --project scripts/tsconfig.json scripts/integrat
 
 ---
 
+## 🏷️ Issue Labels
+
+Before filing an issue or PR, apply the appropriate labels. See [docs/labels.md](docs/labels.md) for the full label taxonomy — covering type, area, and difficulty labels.
+
+---
+
 ## 📥 Pull Request (PR) Guidelines
 
 * **Target Branch:** Always base your feature or fix branch off the `main` branch.
