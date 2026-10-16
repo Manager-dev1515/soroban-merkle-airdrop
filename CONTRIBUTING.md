@@ -74,6 +74,29 @@ Navigate to the contract directory or run commands targeting the manifest path:
 
 ---
 
+## 🏷️ GitHub Labels
+
+When filing issues or pull requests, please apply the correct labels so maintainers can triage efficiently.
+
+See **[docs/labels.md](docs/labels.md)** for the full label taxonomy — including type labels (`bug`, `feature`, `docs`, `security`, …), area labels (`area: contract`, `area: cli`, `area: frontend`, …), difficulty labels, and guidance on combining them.
+
+---
+
+## 🔐 Secret Key Security
+
+The CLI `claim` command accepts a Stellar secret key to sign transactions. **Never pass your secret key as a command-line argument** — it will appear in shell history and process listings.
+
+Always use the environment variable instead:
+
+```bash
+export STELLAR_SECRET_KEY="S..."
+merkle-airdrop claim --tree merkle-tree.json --address G... --contract-id C...
+```
+
+The `--secret-key` flag is available as a convenience for non-interactive scripts in secure environments (e.g., CI), but it should never be used on a shared machine or logged to a terminal.
+
+---
+
 ## 📥 Pull Request (PR) Guidelines
 
 * **Target Branch:** Always base your feature or fix branch off the `main` branch.

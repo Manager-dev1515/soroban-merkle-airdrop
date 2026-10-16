@@ -162,6 +162,8 @@ This means:
 
 See [docs/contributing.md](docs/contributing.md).
 
+When filing issues or pull requests, consult the [GitHub Labels Guide](docs/labels.md) to apply the correct labels.
+
 ## License
 
 MIT
