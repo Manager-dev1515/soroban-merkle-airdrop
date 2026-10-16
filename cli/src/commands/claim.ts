@@ -11,16 +11,29 @@ import { resolve } from "path";
 import chalk from "chalk";
 import ora from "ora";
 import { createAirdropClient, verifyProof, NETWORKS } from "@soroban-merkle-airdrop/sdk";
+import { translateContractError } from "../errors.js";
 
 export const claimCommand = new Command("claim")
   .description("Claim tokens from the airdrop")
   .requiredOption("-t, --tree <file>", "Merkle tree JSON (output of generate)")
   .requiredOption("-a, --address <address>", "Address to claim for")
-  .option("-k, --secret-key <key>", "Stellar secret key (or set STELLAR_SECRET_KEY)")
+  .option("-k, --secret-key <key>", "Stellar secret key (prefer STELLAR_SECRET_KEY env var)")
   .action(async (opts, cmd) => {
     const globalOpts = cmd.parent?.opts() ?? {};
     const network = globalOpts.network ?? "testnet";
     const contractId = globalOpts.contractId ?? process.env.AIRDROP_CONTRACT_ID;
+
+    // Warn when the secret key was supplied as a CLI argument rather than via
+    // the environment variable — it will be visible in shell history and `ps`.
+    if (opts.secretKey) {
+      console.warn(
+        chalk.yellow(
+          "Warning: passing secret keys as command-line arguments is insecure. " +
+          "Use STELLAR_SECRET_KEY env var instead."
+        )
+      );
+    }
+
     const secretKey = opts.secretKey ?? process.env.STELLAR_SECRET_KEY;
 
     if (!contractId) {
@@ -44,7 +57,7 @@ export const claimCommand = new Command("claim")
       const proof = { ...entry, amount: BigInt(entry.amount) };
 
       spinner.text = "Verifying proof locally...";
-      const valid = verifyProof(raw.root, proof.address, proof.amount, proof.proof);
+      const valid = verifyProof(raw.root, contractId, proof.address, proof.amount, proof.proof);
       if (!valid) {
         spinner.fail(chalk.red("Proof verification failed — tree may be corrupted"));
         process.exit(1);
@@ -53,6 +66,8 @@ export const claimCommand = new Command("claim")
       const preset = NETWORKS[network];
       const client = createAirdropClient({
         ...preset,
+        // Override rpcUrl if --rpc-url was provided on the global options.
+        ...(globalOpts.rpcUrl ? { rpcUrl: globalOpts.rpcUrl } : {}),
         contractId,
       });
 
@@ -71,7 +86,8 @@ export const claimCommand = new Command("claim")
       console.log(`  ${chalk.bold("Address:")} ${result.address}`);
       console.log(`  ${chalk.bold("Amount:")}  ${result.amount.toString()}\n`);
     } catch (err) {
-      spinner.fail(`Error: ${(err as Error).message}`);
+      const message = translateContractError((err as Error).message);
+      spinner.fail(`Error: ${message}`);
       process.exit(1);
     }
   });
