@@ -4,25 +4,19 @@ export default function HomePage() {
   return (
     <div>
       <div style={{ textAlign: "center", marginBottom: 56 }}>
-        <div style={{ fontSize: 64, marginBottom: 16 }}>🪂</div>
-        <h1 style={{ fontSize: 40, fontWeight: 800, marginBottom: 12 }}>
+        <div style={{ fontSize: 64, marginBottom: 16 }} aria-hidden="true">🪂</div>
+        <h1 style={{ fontSize: "clamp(28px, 6vw, 40px)", fontWeight: 800, marginBottom: 12 }}>
           Token Airdrop
         </h1>
-        <p
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 18,
-            maxWidth: 540,
-            margin: "0 auto 32px",
-          }}
-        >
+        <p style={{ color: "#aaa", fontSize: "clamp(15px, 3vw, 18px)", maxWidth: 540, margin: "0 auto 32px" }}>
           Check if your address is eligible and claim your tokens using a
           cryptographic Merkle proof — verified on-chain.
         </p>
         <Link
           href="/claim"
           style={{
-            display: "inline-block",
+            display: "inline-flex",
+            alignItems: "center",
             padding: "14px 36px",
             background: "var(--accent)",
             color: "var(--accent-fg)",
@@ -30,20 +24,15 @@ export default function HomePage() {
             fontSize: 16,
             borderRadius: 10,
             textDecoration: "none",
+            minHeight: 44,
           }}
         >
           Check Eligibility →
         </Link>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          gap: 20,
-          marginTop: 48,
-        }}
-      >
+      {/* ── Feature grid — 3 col on desktop, 2 col on tablet, 1 col on mobile ── */}
+      <div className="feature-grid" role="list">
         {[
           {
             icon: "🌲",
@@ -63,27 +52,12 @@ export default function HomePage() {
         ].map(({ icon, title, desc }) => (
           <div
             key={title}
-            style={{
-              border: "1px solid var(--border)",
-              borderRadius: 12,
-              padding: 24,
-              background: "var(--surface)",
-            }}
+            role="listitem"
+            style={{ border: "1px solid #222", borderRadius: 12, padding: 24, background: "#111" }}
           >
-            <div style={{ fontSize: 28, marginBottom: 10 }}>{icon}</div>
-            <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700 }}>
-              {title}
-            </h3>
-            <p
-              style={{
-                margin: 0,
-                color: "var(--text-muted)",
-                fontSize: 13,
-                lineHeight: 1.6,
-              }}
-            >
-              {desc}
-            </p>
+            <div style={{ fontSize: 28, marginBottom: 10 }} aria-hidden="true">{icon}</div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700 }}>{title}</h3>
+            <p style={{ margin: 0, color: "#888", fontSize: 13, lineHeight: 1.6 }}>{desc}</p>
           </div>
         ))}
       </div>
