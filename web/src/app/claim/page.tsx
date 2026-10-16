@@ -73,6 +73,35 @@ const spinnerStyles = `
   }
 `;
 
+interface ClaimRecord {
+  address: string;
+  txHash: string;
+  amount: string;
+  timestamp: string; // ISO 8601
+}
+
+type ClaimHistory = Record<string, ClaimRecord[]>;
+
+function loadHistory(): ClaimHistory {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "{}") as ClaimHistory;
+  } catch {
+    return {};
+  }
+}
+
+function saveRecord(record: ClaimRecord): void {
+  const history = loadHistory();
+  const existing = history[record.address] ?? [];
+  history[record.address] = [record, ...existing];
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+}
+
+function clearHistory(): void {
+  localStorage.removeItem(HISTORY_KEY);
+}
+
 export default function ClaimPage() {
   const { network, contractId } = useNetwork();
 
@@ -96,6 +125,16 @@ export default function ClaimPage() {
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const [txHash, setTxHash] = useState("");
+  const [history, setHistory] = useState<ClaimHistory>({});
+
+  // Load history once on mount (client-only).
+  useEffect(() => {
+    setHistory(loadHistory());
+  }, []);
+
+  function refreshHistory() {
+    setHistory(loadHistory());
+  }
 
   // ── #77: Expiration state ────────────────────────────────────────────────
   /** Unix timestamp (seconds) when the airdrop expires, or null if unknown. */
@@ -689,6 +728,67 @@ export default function ClaimPage() {
           </div>
         )}
       </div>
+
+      {/* ── Claim History ─────────────────────────────────────── */}
+      <section style={{ marginTop: 48 }} aria-label="Claim history">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Claim History</h2>
+          {allRecords.length > 0 && (
+            <button
+              onClick={handleClearHistory}
+              style={{
+                padding: "6px 14px", background: "transparent",
+                border: "1px solid #555", borderRadius: 6,
+                color: "#aaa", fontSize: 12, cursor: "pointer",
+              }}
+              aria-label="Clear claim history"
+            >
+              Clear history
+            </button>
+          )}
+        </div>
+
+        {allRecords.length === 0 ? (
+          <p style={{ color: "#555", fontSize: 13 }}>
+            No claims recorded in this browser yet. Successfully claimed transactions will appear here.
+          </p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+            {allRecords.map((rec) => (
+              <li
+                key={`${rec.address}-${rec.txHash}`}
+                style={{
+                  padding: "14px 16px", borderRadius: 8, background: "#111",
+                  border: "1px solid #2a2a2a", fontSize: 13,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+                  <span style={{ color: "#aaa", fontFamily: "monospace", wordBreak: "break-all" }}>
+                    {rec.address}
+                  </span>
+                  <span style={{ color: "#555", whiteSpace: "nowrap" }}>
+                    {new Date(rec.timestamp).toLocaleString()}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <span style={{ color: "#4caf50", fontWeight: 600 }}>
+                    {rec.amount} tokens
+                  </span>
+                  <a
+                    href={`https://stellar.expert/explorer/${NETWORK}/tx/${rec.txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#8ae4ff" }}
+                    aria-label={`View transaction ${rec.txHash} on Stellar Expert`}
+                  >
+                    {rec.txHash.slice(0, 8)}…{rec.txHash.slice(-8)} ↗
+                  </a>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
