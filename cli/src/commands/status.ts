@@ -28,16 +28,20 @@ export const statusCommand = new Command("status")
       const preset = NETWORKS[network];
       const client = createAirdropClient({ ...preset, contractId });
 
-      const [active, root, total, exp] = await Promise.all([
-        client.isActive(),
-        client.merkleRoot(),
-        client.totalDeposited(),
-        client.expiration(),
-      ]);
+      const info = await client.contractInfo();
+
+      if (!info) {
+        spinner.warn("Contract is not initialized.");
+        console.log(`\n  ${chalk.bold("Contract:")}    ${chalk.cyan(contractId)}`);
+        console.log(`  ${chalk.bold("Network:")}     ${network}`);
+        console.log(`  ${chalk.bold("Status:")}      ${chalk.red("not initialized")}\n`);
+        return;
+      }
 
       // Format expiration for display.
       let expirationLine: string;
-      if (exp === null) {
+      const exp = info.expiration;
+      if (exp === 0n) {
         expirationLine = chalk.gray("not set");
       } else {
         const expMs = Number(exp) * 1000;
@@ -53,9 +57,9 @@ export const statusCommand = new Command("status")
       spinner.succeed("Contract status:");
       console.log(`\n  ${chalk.bold("Contract:")}    ${chalk.cyan(contractId)}`);
       console.log(`  ${chalk.bold("Network:")}     ${network}`);
-      console.log(`  ${chalk.bold("Active:")}      ${active ? chalk.green("yes") : chalk.red("no")}`);
-      console.log(`  ${chalk.bold("Root:")}        ${chalk.cyan(root ?? "not initialized")}`);
-      console.log(`  ${chalk.bold("Deposited:")}   ${total.toString()}`);
+      console.log(`  ${chalk.bold("Active:")}      ${info.active ? chalk.green("yes") : chalk.red("no")}`);
+      console.log(`  ${chalk.bold("Root:")}        ${chalk.cyan(info.merkleRoot)}`);
+      console.log(`  ${chalk.bold("Deposited:")}   ${info.totalDeposited.toString()}`);
       console.log(`  ${chalk.bold("Expiration:")}  ${expirationLine}`);
 
       if (opts.address) {

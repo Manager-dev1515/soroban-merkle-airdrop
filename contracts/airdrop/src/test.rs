@@ -914,3 +914,121 @@ fn test_verify_proof_all_same_hash_returns_false() {
         "all-same-hash proof against a real root must return false"
     );
 }
+
+// ─── Issue #132: contract_info() ────────────────────────────────────────────
+
+/// contract_info() returns None before initialisation.
+#[test]
+fn test_contract_info_uninitialized_returns_none() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AirdropContract, ());
+    let client = AirdropContractClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.contract_info(),
+        None,
+        "contract_info() must return None before initialize()"
+    );
+}
+
+/// contract_info() returns all fields after initialisation.
+#[test]
+fn test_contract_info_initialized_returns_all_fields() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, 1000, &admin, 500);
+    mint(&env, &token, &admin, &admin, 1500);
+    client.initialize(&admin, &token, &root, &1500, &DEFAULT_EXPIRATION);
+
+    let info = client.contract_info().expect("contract_info() must return Some after initialize()");
+
+    assert_eq!(info.admin, admin, "admin field mismatch");
+    assert_eq!(info.token, token, "token field mismatch");
+    assert_eq!(info.merkle_root, root, "merkle_root field mismatch");
+    assert_eq!(info.total_deposited, 1500, "total_deposited field mismatch");
+    assert!(info.active, "active must be true after initialize");
+    assert_eq!(info.expiration, DEFAULT_EXPIRATION, "expiration field mismatch");
+}
+
+/// contract_info() reflects active=false after set_active(false).
+#[test]
+fn test_contract_info_reflects_paused_state() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, 1000, &admin, 500);
+    mint(&env, &token, &admin, &admin, 1500);
+    client.initialize(&admin, &token, &root, &1500, &DEFAULT_EXPIRATION);
+
+    client.set_active(&false);
+
+    let info = client.contract_info().expect("Some after initialize");
+    assert!(!info.active, "contract_info().active must be false after set_active(false)");
+}
+
+// ─── Issue #135: overflow-safe amount arithmetic ─────────────────────────────
+
+/// leaf_hash with amount = i128::MAX must not panic.
+#[test]
+fn test_leaf_hash_i128_max_no_panic() {
+    let env = Env::default();
+    let addr = Address::generate(&env);
+    // This must complete without panicking.
+    let _leaf = merkle::leaf_hash(&env, &addr, i128::MAX);
+}
+
+/// initialize with total_amount = i128::MAX — documents expected behaviour.
+///
+/// With overflow-checks = true in the release profile, any arithmetic overflow
+/// would panic. This test verifies that storing and reading back i128::MAX
+/// from instance storage does not cause overflow. The token transfer will
+/// succeed in mock mode regardless of amount.
+#[test]
+fn test_initialize_i128_max_total_amount() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, i128::MAX, &admin, 500);
+    mint(&env, &token, &admin, &admin, i128::MAX);
+
+    // Must not panic — storing and reading i128::MAX is safe.
+    client.initialize(&admin, &token, &root, &i128::MAX, &DEFAULT_EXPIRATION);
+
+    assert_eq!(client.total_deposited(), i128::MAX);
+}
+
+/// claim with amount = i128::MAX in a single-leaf tree does not overflow.
+///
+/// leaf_hash uses `amount.to_be_bytes()` (always safe) and the transfer
+/// passes i128::MAX directly to the token client. No arithmetic is performed
+/// on the amount itself inside the contract, so there is no overflow risk —
+/// this test documents and verifies that property.
+#[test]
+fn test_claim_i128_max_no_overflow() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    // Single-leaf tree: root == leaf (empty proof).
+    let leaf = merkle::leaf_hash(&env, &claimant, i128::MAX);
+    let empty_proof: Vec<BytesN<32>> = Vec::new(&env);
+
+    mint(&env, &token, &admin, &admin, i128::MAX);
+    // Pass the leaf directly as the root.
+    client.initialize(&admin, &token, &leaf, &i128::MAX, &DEFAULT_EXPIRATION);
+
+    // Must not overflow or panic.
+    client.claim(&claimant, &i128::MAX, &empty_proof);
+
+    assert_eq!(
+        TokenClient::new(&env, &token).balance(&claimant),
+        i128::MAX,
+        "claimant must receive i128::MAX tokens"
+    );
+    assert!(client.is_claimed(&claimant));
+}

@@ -60,6 +60,25 @@ export interface ClaimResult {
   amount: bigint;
 }
 
+/**
+ * Snapshot of all contract instance state, returned by `contractInfo()`.
+ * Mirrors the `ContractInfo` struct in contracts/airdrop/src/types.rs.
+ */
+export interface ContractInfo {
+  /** Admin address — can pause and reclaim. */
+  admin: string;
+  /** SEP-41 token contract being distributed. */
+  token: string;
+  /** 32-byte Merkle root as a hex string. */
+  merkleRoot: string;
+  /** Total tokens deposited at initialize. */
+  totalDeposited: bigint;
+  /** Whether the airdrop is currently accepting claims. */
+  active: boolean;
+  /** Unix timestamp (seconds) after which reclaim() is permitted. */
+  expiration: bigint;
+}
+
 // ─── Typed error classes ─────────────────────────────────────────────────────
 
 /**

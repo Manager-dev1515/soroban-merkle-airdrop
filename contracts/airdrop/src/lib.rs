@@ -42,7 +42,7 @@ use soroban_sdk::{
     contract, contractimpl, contractmeta, symbol_short, token::Client as TokenClient, Address,
     BytesN, Env, Vec,
 };
-use types::{AirdropEntry, AirdropError, DataKey};
+use types::{AirdropEntry, AirdropError, ContractInfo, DataKey};
 
 contractmeta!(
     key = "Description",
@@ -405,6 +405,49 @@ impl AirdropContract {
             .instance()
             .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
         env.storage().instance().get(&DataKey::Expiration)
+    }
+
+    /// Return all contract instance state in a single call.
+    ///
+    /// Returns `None` if the contract has not been initialised yet, and
+    /// `Some(ContractInfo)` otherwise. This lets clients avoid 5–6 separate
+    /// RPC simulation calls to read individual fields.
+    ///
+    /// Refreshes instance storage TTL so dormant airdrops do not get archived.
+    pub fn contract_info(env: Env) -> Option<ContractInfo> {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
+
+        // Use MerkleRoot as the sentinel for initialisation.
+        let merkle_root: BytesN<32> = env.storage().instance().get(&DataKey::MerkleRoot)?;
+
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)?;
+        let token: Address = env.storage().instance().get(&DataKey::TokenAddress)?;
+        let total_deposited: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalDeposited)
+            .unwrap_or(0);
+        let active: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Active)
+            .unwrap_or(false);
+        let expiration: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Expiration)
+            .unwrap_or(0);
+
+        Some(ContractInfo {
+            admin,
+            token,
+            merkle_root,
+            total_deposited,
+            active,
+            expiration,
+        })
     }
 }
 

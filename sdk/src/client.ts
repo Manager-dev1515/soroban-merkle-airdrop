@@ -16,7 +16,7 @@ import {
   Account,
   Networks,
 } from "@stellar/stellar-sdk";
-import type { ClaimProof, ClaimResult, NetworkConfig } from "./types.js";
+import type { ClaimProof, ClaimResult, ContractInfo, NetworkConfig } from "./types.js";
 import { AirdropContractError, RpcError } from "./types.js";
 
 export function createAirdropClient(config: NetworkConfig) {
@@ -61,6 +61,36 @@ export function createAirdropClient(config: NetworkConfig) {
     const native = scValToNative(result);
     if (native === null || native === undefined) return null;
     return BigInt(native as number);
+  }
+
+  /**
+   * Fetch all contract state in a single RPC simulation call.
+   *
+   * Returns `null` if the contract has not been initialised yet, and a
+   * {@link ContractInfo} snapshot otherwise. Prefer this over calling
+   * `isActive()`, `merkleRoot()`, `totalDeposited()`, and `expiration()`
+   * separately.
+   *
+   * @example
+   * ```ts
+   * const info = await client.contractInfo();
+   * if (!info) { console.log("Not initialized"); }
+   * else { console.log("Root:", info.merkleRoot); }
+   * ```
+   */
+  async function contractInfo(): Promise<ContractInfo | null> {
+    const result = await simulateRead(contractInst.call("contract_info"));
+    const native = scValToNative(result) as Record<string, unknown> | null | undefined;
+    if (native === null || native === undefined) return null;
+
+    return {
+      admin: native.admin as string,
+      token: native.token as string,
+      merkleRoot: Buffer.from(native.merkle_root as Uint8Array).toString("hex"),
+      totalDeposited: BigInt(native.total_deposited as number),
+      active: native.active as boolean,
+      expiration: BigInt(native.expiration as number),
+    };
   }
 
   /**
@@ -259,7 +289,7 @@ export function createAirdropClient(config: NetworkConfig) {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  return { isClaimed, isActive, merkleRoot, totalDeposited, expiration, claim, buildClaimTransaction, submitSignedTransaction };
+  return { isClaimed, isActive, merkleRoot, totalDeposited, expiration, contractInfo, claim, buildClaimTransaction, submitSignedTransaction };
 }
 
 /**
