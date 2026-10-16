@@ -231,6 +231,20 @@ STELLAR_SECRET_KEY=S... ts-node --project scripts/tsconfig.json scripts/integrat
 
 ---
 
+## 🔑 Secret Key Security
+
+The CLI `claim` command requires a Stellar secret key to sign transactions. **Never pass your secret key as a command-line argument** — it will be visible in your shell history and system process listings.
+
+Instead, use the environment variable approach:
+```bash
+export STELLAR_SECRET_KEY=S...
+merkle-airdrop claim --tree merkle-tree.json --address G...
+```
+
+The `--secret-key` flag is provided for convenience only. If you use it, the CLI will print a warning reminding you to prefer the environment variable.
+
+---
+
 ## 📥 Pull Request (PR) Guidelines
 
 * **Target Branch:** Always base your feature or fix branch off the `main` branch.
