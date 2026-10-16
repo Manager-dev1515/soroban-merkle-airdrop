@@ -74,6 +74,51 @@ pub fn leaf_hash(env: &Env, contract_id: &Address, claimant: &Address, amount: i
 /// is a member of the tree with root `root`.
 ///
 /// `proof` is an ordered list of sibling hashes from leaf to root.
+///
+/// # Examples
+///
+/// ```
+/// use soroban_sdk::{Address, Bytes, BytesN, Env, Vec};
+/// use soroban_merkle_airdrop::merkle::{leaf_hash, verify_proof};
+///
+/// let env = Env::default();
+///
+/// let alice = Address::from_str(
+///     &env,
+///     "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+/// );
+/// let bob = Address::from_str(
+///     &env,
+///     "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+/// );
+///
+/// // Build a two-leaf tree: root = hash_pair(leaf_alice, leaf_bob).
+/// let leaf_alice = leaf_hash(&env, &alice, 1_000);
+/// let leaf_bob   = leaf_hash(&env, &bob, 500);
+///
+/// // Sort and hash the two leaves to get the root (mirrors the contract's hash_pair logic).
+/// let root: BytesN<32> = {
+///     let mut data = Bytes::new(&env);
+///     let (first, second) = if leaf_alice.as_ref() <= leaf_bob.as_ref() {
+///         (leaf_alice.clone(), leaf_bob.clone())
+///     } else {
+///         (leaf_bob.clone(), leaf_alice.clone())
+///     };
+///     data.append(&first.into());
+///     data.append(&second.into());
+///     env.crypto().sha256(&data).into()
+/// };
+///
+/// // Alice's proof is just Bob's leaf hash (her sibling in the two-leaf tree).
+/// let mut proof_alice: Vec<BytesN<32>> = Vec::new(&env);
+/// proof_alice.push_back(leaf_bob.clone());
+///
+/// assert!(verify_proof(&env, &root, leaf_alice.clone(), &proof_alice));
+///
+/// // A tampered proof (empty) must not verify against the same root.
+/// let empty_proof: Vec<BytesN<32>> = Vec::new(&env);
+/// assert!(!verify_proof(&env, &root, leaf_alice, &empty_proof));
+/// ```
 pub fn verify_proof(
     env: &Env,
     root: &BytesN<32>,
