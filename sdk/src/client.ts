@@ -22,6 +22,7 @@ import {
 import type { Transaction } from "@stellar/stellar-sdk";
 import type { ClaimProof, ClaimResult, NetworkConfig } from "./types.js";
 import { AirdropContractError, RpcError } from "./types.js";
+import { verifyProof } from "./merkle.js";
 
 /**
  * Create a typed client for an on-chain soroban-merkle-airdrop contract.
@@ -374,6 +375,34 @@ export function createAirdropClient(config: NetworkConfig) {
     }
   }
 
+  /**
+   * Verify a claim proof against the on-chain Merkle root.
+   *
+   * Fetches the current Merkle root from the contract and verifies the proof
+   * locally using {@link verifyProof} from the SDK's Merkle module. Useful for
+   * confirming a proof is valid before submitting a claim transaction.
+   *
+   * @param claimProof - The proof package for the claimant (from `buildMerkleTree`).
+   * @returns `true` if the proof is valid against the on-chain root,
+   *   `false` if it is invalid **or** if the contract has not been initialised
+   *   (i.e. `merkleRoot()` returns `null`).
+   *
+   * @example
+   * ```ts
+   * const valid = await client.verifyClaimProof(proof);
+   * if (!valid) {
+   *   console.error("Proof is invalid — tree may be for a different contract");
+   * }
+   * ```
+   */
+  async function verifyClaimProof(claimProof: ClaimProof): Promise<boolean> {
+    const root = await merkleRoot();
+    if (root === null) {
+      return false;
+    }
+    return verifyProof(root, config.contractId, claimProof.address, claimProof.amount, claimProof.proof);
+  }
+
   // ─── Internal helpers ──────────────────────────────────────────────────────
 
   async function simulateRead(operation: xdr.Operation): Promise<xdr.ScVal> {
@@ -407,6 +436,7 @@ export function createAirdropClient(config: NetworkConfig) {
     claim,
     buildClaimTransaction,
     submitSignedTransaction,
+    verifyClaimProof,
   };
 }
 

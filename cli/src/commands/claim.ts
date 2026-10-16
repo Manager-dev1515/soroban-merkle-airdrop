@@ -10,7 +10,7 @@ import { readFile } from "fs/promises";
 import { resolve } from "path";
 import chalk from "chalk";
 import ora from "ora";
-import { createAirdropClient, verifyProof, NETWORKS } from "@soroban-merkle-airdrop/sdk";
+import { createAirdropClient, NETWORKS } from "@soroban-merkle-airdrop/sdk";
 import { translateContractError } from "../errors.js";
 
 export const claimCommand = new Command("claim")
@@ -44,13 +44,6 @@ export const claimCommand = new Command("claim")
 
       const proof = { ...entry, amount: BigInt(entry.amount) };
 
-      spinner.text = "Verifying proof locally...";
-      const valid = verifyProof(raw.root, contractId, proof.address, proof.amount, proof.proof);
-      if (!valid) {
-        spinner.fail(chalk.red("Proof verification failed — tree may be corrupted"));
-        process.exit(1);
-      }
-
       const preset = NETWORKS[network];
       const client = createAirdropClient({
         ...preset,
@@ -58,6 +51,13 @@ export const claimCommand = new Command("claim")
         ...(globalOpts.rpcUrl ? { rpcUrl: globalOpts.rpcUrl } : {}),
         contractId,
       });
+
+      spinner.text = "Verifying proof locally...";
+      const valid = await client.verifyClaimProof(proof);
+      if (!valid) {
+        spinner.fail(chalk.red("Proof verification failed — tree may be corrupted or built for a different contract"));
+        process.exit(1);
+      }
 
       spinner.text = "Checking claim status...";
       const already = await client.isClaimed(opts.address);
