@@ -73,6 +73,18 @@ const spinnerStyles = `
   }
 `;
 
+// Map status → CSS variable name for border/text colour
+const statusVar: Record<Status, string> = {
+  idle:         "var(--text-muted)",
+  checking:     "var(--text-muted)",
+  eligible:     "var(--success)",
+  not_eligible: "var(--accent)",
+  claimed:      "var(--accent)",
+  claiming:     "var(--text-muted)",
+  success:      "var(--success)",
+  error:        "var(--error)",
+};
+
 export default function ClaimPage() {
   const { network, contractId } = useNetwork();
 
@@ -682,7 +694,7 @@ export default function ClaimPage() {
               href={`https://stellar.expert/explorer/${network}/tx/${txHash}`}
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: "#8ae4ff", fontSize: 13 }}
+              style={{ color: "var(--accent)", fontSize: 13 }}
             >
               View transaction on Stellar Expert →
             </a>
