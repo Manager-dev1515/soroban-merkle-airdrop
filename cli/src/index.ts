@@ -5,6 +5,7 @@ import { generateCommand } from "./commands/generate.js";
 import { claimCommand } from "./commands/claim.js";
 import { statusCommand } from "./commands/status.js";
 import { deployCommand } from "./commands/deploy.js";
+import { reclaimCommand } from "./commands/reclaim.js";
 
 const program = new Command();
 
@@ -22,6 +23,7 @@ program.addCommand(generateCommand);
 program.addCommand(claimCommand);
 program.addCommand(statusCommand);
 program.addCommand(deployCommand);
+program.addCommand(reclaimCommand);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error((err as Error).message);

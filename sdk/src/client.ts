@@ -213,6 +213,94 @@ export function createAirdropClient(config: NetworkConfig) {
     }
   }
 
+  /**
+   * Reclaim unclaimed tokens after the airdrop expires.
+   *
+   * Only callable by the contract admin. Builds, simulates, signs, and
+   * submits a `reclaim` transaction, then polls for the result.
+   *
+   * @param adminSecretKey - The admin's Stellar secret key (S...).
+   * @returns An object containing the transaction hash and the amount reclaimed.
+   *
+   * @throws {AirdropContractError} if the contract is still active or the
+   *   caller is not the admin (Unauthorized).
+   * @throws {RpcError} on network or simulation failures.
+   */
+  async function reclaim(
+    adminSecretKey: string
+  ): Promise<{ txHash: string; amount: bigint }> {
+    const keypair = Keypair.fromSecret(adminSecretKey);
+    const sourceAccount = await server.getAccount(keypair.publicKey());
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: config.networkPassphrase,
+    })
+      .addOperation(contractInst.call("reclaim"))
+      .setTimeout(30)
+      .build();
+
+    const simResult = await server.simulateTransaction(tx);
+    if (rpc.Api.isSimulationError(simResult)) {
+      const contractCode = parseContractErrorCode(simResult.error);
+      if (contractCode !== null) {
+        throw new AirdropContractError(contractCode);
+      }
+      // Produce a friendlier error for the two most common reclaim failures.
+      const lower = simResult.error.toLowerCase();
+      if (lower.includes("active") || lower.includes("not expired")) {
+        throw new RpcError(
+          "Cannot reclaim: the airdrop is still active. " +
+          "Wait until the airdrop period has expired before reclaiming."
+        );
+      }
+      if (lower.includes("unauthorized") || lower.includes("auth")) {
+        throw new RpcError(
+          "Cannot reclaim: admin authorisation failed. " +
+          "Ensure you are using the deployer/admin secret key."
+        );
+      }
+      throw new RpcError(`Simulation failed: ${simResult.error}`);
+    }
+
+    const preparedTx = rpc.assembleTransaction(tx, simResult).build();
+    preparedTx.sign(keypair);
+
+    const sendResult = await server.sendTransaction(preparedTx);
+    if (sendResult.status === "ERROR") {
+      throw new RpcError(
+        `Transaction submission failed`,
+        sendResult.errorResult?.toXDR("base64")
+      );
+    }
+
+    const txHash = sendResult.hash;
+    while (true) {
+      await sleep(2000);
+      const poll = await server.getTransaction(txHash);
+      if (poll.status === "SUCCESS") {
+        // The contract returns the reclaimed amount as an i128.
+        // Extract it from the transaction result metadata if available.
+        let amount = 0n;
+        if (
+          poll.status === "SUCCESS" &&
+          (poll as rpc.Api.GetSuccessfulTransactionResponse).returnValue
+        ) {
+          try {
+            const retval = (poll as rpc.Api.GetSuccessfulTransactionResponse).returnValue!;
+            amount = BigInt(scValToNative(retval) as number);
+          } catch {
+            // Not critical — the tx succeeded even if we can't parse the amount.
+          }
+        }
+        return { txHash, amount };
+      }
+      if (poll.status === "FAILED") {
+        throw new RpcError(`Reclaim transaction failed on-chain: ${txHash}`);
+      }
+    }
+  }
+
   async function simulateRead(operation: xdr.Operation): Promise<xdr.ScVal> {
     const dummy = Keypair.random();
     const account = new Account(dummy.publicKey(), "0");
@@ -235,7 +323,7 @@ export function createAirdropClient(config: NetworkConfig) {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  return { isClaimed, isActive, merkleRoot, totalDeposited, claim, buildClaimTransaction, submitSignedTransaction };
+  return { isClaimed, isActive, merkleRoot, totalDeposited, claim, buildClaimTransaction, submitSignedTransaction, reclaim };
 }
 
 /**
