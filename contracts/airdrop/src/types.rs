@@ -19,6 +19,8 @@ pub enum DataKey {
     Active,
     /// Unix timestamp (seconds) after which `reclaim()` is permitted.
     Expiration,
+    /// Count of successful claims.
+    ClaimedCount,
 }
 
 /// Errors returned by the airdrop contract.
@@ -39,6 +41,9 @@ pub enum AirdropError {
     ZeroAmount = 6,
     /// `reclaim()` called before the expiration timestamp has been reached.
     NotYetExpired = 7,
+    /// `initialize()` called with an expiration timestamp that is already in
+    /// the past (i.e. `expiration <= env.ledger().timestamp()`).
+    ExpirationInPast = 8,
 }
 
 /// A snapshot of all contract instance state, returned by `contract_info()`.
