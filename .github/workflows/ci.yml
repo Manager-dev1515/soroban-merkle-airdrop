@@ -101,6 +101,9 @@ jobs:
       - name: Build CLI
         run: pnpm build
         working-directory: cli
+      - name: Typecheck CLI
+        run: pnpm typecheck
+        working-directory: cli
       - name: Lint CLI
         run: pnpm lint
         working-directory: cli
@@ -133,6 +136,9 @@ jobs:
       - name: Build SDK
         run: pnpm build
         working-directory: sdk
+      - name: Typecheck web
+        run: pnpm typecheck
+        working-directory: web
       - name: Audit web dependencies
         # Fail the build on high or critical vulnerabilities in web/.
         # To suppress a known false-positive, add it to web/.npmrc:
