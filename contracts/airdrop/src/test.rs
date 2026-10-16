@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
     Address, BytesN, Env, IntoVal, Vec,
 };
@@ -372,5 +372,172 @@ fn test_leaf_hash_known_vector() {
     assert_eq!(
         actual, expected,
         "Rust leaf_hash does not match TypeScript SDK output — the two implementations disagree"
+    );
+}
+
+// ─── Issue #103: Insufficient contract balance test ────────────────────────
+
+/// Verify that a claim fails gracefully when the contract no longer holds
+/// enough tokens to cover the claimant's allocation.
+///
+/// Scenario:
+///   - The admin initialises the airdrop with only 1000 tokens (enough for
+///     alice but not for both alice and bob if the tree allocates 1000 each).
+///   - Alice's claim succeeds, draining the contract balance to zero.
+///   - Bob then attempts to claim his 500-token allocation. The contract has
+///     verified his Merkle proof and marked him as claimed, but the underlying
+///     SEP-41 token transfer panics because the contract balance is 0.
+///
+/// Expected behaviour: the transaction panics/fails at the token transfer
+/// level. The Soroban test harness surfaces this as a host error rather than
+/// a silent no-op — the contract does NOT silently succeed with a zero payout.
+#[test]
+#[should_panic]
+fn test_claim_fails_when_contract_has_insufficient_balance() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    // Build a tree allocating 1000 to alice and 500 to bob.
+    let (root, alice_proof, bob_proof) =
+        build_two_leaf_tree(&env, &alice, 1000, &bob, 500);
+
+    // Deliberately initialise with only 1000 tokens — enough for alice only.
+    // This simulates an under-funded airdrop (or one where most tokens have
+    // already been claimed and the remainder is less than bob's allocation).
+    mint(&env, &token, &admin, &admin, 1000);
+    client.initialize(&admin, &token, &root, &1000, &DEFAULT_EXPIRATION);
+
+    // Alice claims successfully — contract balance is now 0.
+    client.claim(&alice, &1000, &alice_proof);
+    assert_eq!(TokenClient::new(&env, &token).balance(&alice), 1000);
+
+    // Bob's claim: proof is valid so the contract marks him as claimed, but the
+    // subsequent token transfer panics because the contract balance is 0.
+    // The #[should_panic] attribute on this test asserts that the host panics
+    // rather than silently succeeding, ensuring claimants are never silently
+    // short-changed.
+    client.claim(&bob, &500, &bob_proof);
+}
+
+// ─── Issue #102: Event contents tests ─────────────────────────────────────
+
+/// Verify that `initialize` emits an event with the correct topic and data.
+///
+/// Expected event:
+///   topic : (symbol("init"), admin_address)
+///   data  : (merkle_root, total_amount)
+#[test]
+fn test_initialize_emits_correct_event() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, 1000, &admin, 500);
+    let total: i128 = 1500;
+
+    mint(&env, &token, &admin, &admin, total);
+    client.initialize(&admin, &token, &root, &total, &DEFAULT_EXPIRATION);
+
+    // `env.events().all()` returns a ContractEvents that supports
+    // PartialEq<Vec<(Address, Vec<Val>, Val)>>.
+    // We construct the expected event tuple and assert equality.
+    //
+    // Token transfer events are emitted by the underlying SAC before our
+    // "init" event, so we filter to only the airdrop contract's events.
+    let events = env.events().all().filter_by_contract(&contract_id);
+
+    assert_eq!(
+        events,
+        vec![(
+            contract_id.clone(),
+            // topics: (symbol("init"), admin)
+            vec![
+                soroban_sdk::symbol_short!("init").into_val(&env),
+                admin.into_val(&env),
+            ],
+            // data: (merkle_root, total_amount)
+            (root, total).into_val(&env),
+        )],
+        "initialize must emit exactly one 'init' event with (root, total) as data"
+    );
+}
+
+/// Verify that `claim` emits an event with the correct topic and data.
+///
+/// Expected event:
+///   topic : (symbol("claimed"), claimant_address)
+///   data  : amount (i128)
+#[test]
+fn test_claim_emits_correct_event() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, proof, _) = build_two_leaf_tree(&env, &claimant, 1000, &admin, 500);
+
+    mint(&env, &token, &admin, &admin, 1500);
+    client.initialize(&admin, &token, &root, &1500, &DEFAULT_EXPIRATION);
+    client.claim(&claimant, &1000, &proof);
+
+    // Filter to just the airdrop contract events from the last invocation.
+    // The SAC emits its own transfer events; we assert only on ours.
+    let events = env.events().all().filter_by_contract(&contract_id);
+
+    assert_eq!(
+        events,
+        vec![(
+            contract_id.clone(),
+            // topics: (symbol("claimed"), claimant)
+            vec![
+                soroban_sdk::symbol_short!("claimed").into_val(&env),
+                claimant.into_val(&env),
+            ],
+            // data: claimed amount
+            1000_i128.into_val(&env),
+        )],
+        "claim must emit exactly one 'claimed' event with the amount as data"
+    );
+}
+
+/// Verify that `reclaim` emits an event with the correct topic and data.
+///
+/// Expected event:
+///   topic : (symbol("reclaimed"), admin_address)
+///   data  : reclaimed_balance (i128)
+#[test]
+fn test_reclaim_emits_correct_event() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, 1000, &admin, 500);
+
+    // Initialise with 1500 tokens; nobody claims, so full balance is reclaimed.
+    mint(&env, &token, &admin, &admin, 1500);
+    client.initialize(&admin, &token, &root, &1500, &DEFAULT_EXPIRATION);
+
+    // Advance past expiration to allow reclaim.
+    env.ledger().set_timestamp(DEFAULT_EXPIRATION);
+    client.reclaim();
+
+    // Filter to just the airdrop contract events emitted during reclaim().
+    let events = env.events().all().filter_by_contract(&contract_id);
+
+    assert_eq!(
+        events,
+        vec![(
+            contract_id.clone(),
+            // topics: (symbol("reclaimed"), admin)
+            vec![
+                soroban_sdk::symbol_short!("reclaimed").into_val(&env),
+                admin.into_val(&env),
+            ],
+            // data: reclaimed balance (full 1500, since no one claimed)
+            1500_i128.into_val(&env),
+        )],
+        "reclaim must emit exactly one 'reclaimed' event with the balance as data"
     );
 }
