@@ -1441,6 +1441,157 @@ fn test_reclaim_zero_balance_after_all_claimed() {
     );
 }
 
+// ─── Issue #108: Token conservation invariant ────────────────────────────────
+
+/// Build a Merkle tree for `n` claimants and return the root + per-claimant proofs.
+///
+/// Returns `(root, proofs)` where `proofs[i]` is the Soroban `Vec<BytesN<32>>`
+/// proof for `claimants[i]`.
+fn build_n_leaf_tree(
+    env: &Env,
+    contract_id: &Address,
+    claimants: &[Address],
+    amounts: &[i128],
+) -> (BytesN<32>, alloc::vec::Vec<Vec<BytesN<32>>>) {
+    assert_eq!(claimants.len(), amounts.len(), "claimants/amounts length mismatch");
+    let n = claimants.len();
+    assert!(n >= 1, "must have at least one entry");
+
+    // Compute leaf hashes.
+    let leaves: alloc::vec::Vec<BytesN<32>> = claimants
+        .iter()
+        .zip(amounts.iter())
+        .map(|(addr, &amt)| merkle::leaf_hash(env, contract_id, addr, amt))
+        .collect();
+
+    // Build tree layers bottom-up.
+    let mut layers: alloc::vec::Vec<alloc::vec::Vec<BytesN<32>>> = alloc::vec![leaves.clone()];
+    let mut current = leaves;
+
+    while current.len() > 1 {
+        let mut next: alloc::vec::Vec<BytesN<32>> = alloc::vec::Vec::new();
+        let mut i = 0;
+        while i < current.len() {
+            if i + 1 < current.len() {
+                next.push(merkle_pair(env, current[i].clone(), current[i + 1].clone()));
+            } else {
+                // Odd node: promote unchanged.
+                next.push(current[i].clone());
+            }
+            i += 2;
+        }
+        layers.push(next.clone());
+        current = next;
+    }
+
+    let root = current[0].clone();
+
+    // Generate per-leaf proofs.
+    let mut all_proofs: alloc::vec::Vec<Vec<BytesN<32>>> = alloc::vec::Vec::new();
+    for leaf_idx in 0..n {
+        let mut proof: Vec<BytesN<32>> = Vec::new(env);
+        let mut idx = leaf_idx;
+        for layer in 0..layers.len().saturating_sub(1) {
+            let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
+            if sibling_idx < layers[layer].len() {
+                proof.push_back(layers[layer][sibling_idx].clone());
+            }
+            idx /= 2;
+        }
+        all_proofs.push(proof);
+    }
+
+    (root, all_proofs)
+}
+
+/// Issue #108 — Token conservation: N sequential claims leave the contract
+/// balance exactly equal to `total_deposited - sum(claimed_amounts)`.
+///
+/// Runs 4 claimants claiming in sequence and asserts the contract balance
+/// stays consistent after every individual claim, not just at the end.
+#[test]
+fn test_invariant_balance_equals_deposited_minus_claimed() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let token_client = TokenClient::new(&env, &token);
+
+    // Build a 4-claimant tree with distinct amounts.
+    let claimants: alloc::vec::Vec<Address> = (0..4).map(|_| Address::generate(&env)).collect();
+    let amounts: alloc::vec::Vec<i128> = alloc::vec![100, 250, 400, 750];
+    let total: i128 = amounts.iter().sum(); // 1500
+
+    let (root, proofs) = build_n_leaf_tree(&env, &contract_id, &claimants, &amounts);
+
+    mint(&env, &token, &admin, &admin, total);
+    client.initialize(&admin, &token, &root, &total, &DEFAULT_EXPIRATION);
+
+    let mut sum_claimed: i128 = 0;
+
+    for i in 0..claimants.len() {
+        client.claim(&claimants[i], &amounts[i], &proofs[i]);
+        sum_claimed += amounts[i];
+
+        // Invariant: contract balance = total_deposited - sum(claimed so far).
+        let contract_balance = token_client.balance(&contract_id);
+        let expected_balance = total - sum_claimed;
+        assert_eq!(
+            contract_balance, expected_balance,
+            "after claim {i}: contract balance ({contract_balance}) \
+             must equal total_deposited ({total}) - sum_claimed ({sum_claimed})"
+        );
+    }
+
+    // Final state: contract is empty.
+    assert_eq!(
+        token_client.balance(&contract_id),
+        0,
+        "after all claims the contract must hold 0 tokens"
+    );
+}
+
+/// Issue #108 — Overflow guard: attempting to claim more than the deposited
+/// total causes the last claim to fail (token contract rejects transfer from
+/// a zero-balance account).
+///
+/// Setup: 2 claimants whose combined allocation exceeds total_deposited.
+/// Claimant 0 holds the only valid proof for `total_deposited` tokens,
+/// exhausting the contract. Claimant 1 then tries to claim and must fail
+/// because the contract holds no remaining balance.
+#[test]
+#[should_panic]
+fn test_invariant_over_claim_panics_when_balance_exhausted() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+
+    // We want claimant_1's proof to be valid on-chain but the contract to be
+    // empty by then. Use total = 1000: claimant_0 claims all 1000, claimant_1
+    // also has a valid proof for 500 but the contract is empty.
+    let claimant_0 = Address::generate(&env);
+    let claimant_1 = Address::generate(&env);
+
+    // Build a two-leaf tree: claimant_0 = 1000, claimant_1 = 500.
+    // BUT we only deposit 1000 — enough for claimant_0 only.
+    let (root, proof_0, _proof_1) =
+        build_two_leaf_tree(&env, &contract_id, &claimant_0, 1000, &claimant_1, 500);
+
+    // Build a separate valid proof for claimant_1 using the SAME tree.
+    // proof_1 is the proof from the two-leaf tree — it is cryptographically valid.
+    let (_, _, proof_1) =
+        build_two_leaf_tree(&env, &contract_id, &claimant_0, 1000, &claimant_1, 500);
+
+    // Deposit only 1000 — enough for claimant_0 but not both.
+    mint(&env, &token, &admin, &admin, 1000);
+    client.initialize(&admin, &token, &root, &1000, &DEFAULT_EXPIRATION);
+
+    // Claimant 0 drains the contract entirely.
+    client.claim(&claimant_0, &1000, &proof_0);
+
+    // Claimant 1 has a valid Merkle proof but the contract is now empty.
+    // The SEP-41 token contract will panic on the transfer — this is the
+    // expected behaviour documented in test_claim_panics_after_reclaim_empties_contract.
+    client.claim(&claimant_1, &500, &proof_1);
+}
+
 // ─── Issue #37: claim_for ──────────────────────────────────────────────────
 
 /// Operator calls claim_for; tokens land in the claimant's wallet, not the
