@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
     Address, BytesN, Env, IntoVal, Vec,
 };
@@ -373,4 +373,51 @@ fn test_leaf_hash_known_vector() {
         actual, expected,
         "Rust leaf_hash does not match TypeScript SDK output — the two implementations disagree"
     );
+}
+
+// ─── Issue #103: Insufficient contract balance test ────────────────────────
+
+/// Verify that a claim fails gracefully when the contract no longer holds
+/// enough tokens to cover the claimant's allocation.
+///
+/// Scenario:
+///   - The admin initialises the airdrop with only 1000 tokens (enough for
+///     alice but not for both alice and bob if the tree allocates 1000 each).
+///   - Alice's claim succeeds, draining the contract balance to zero.
+///   - Bob then attempts to claim his 500-token allocation. The contract has
+///     verified his Merkle proof and marked him as claimed, but the underlying
+///     SEP-41 token transfer panics because the contract balance is 0.
+///
+/// Expected behaviour: the transaction panics/fails at the token transfer
+/// level. The Soroban test harness surfaces this as a host error rather than
+/// a silent no-op — the contract does NOT silently succeed with a zero payout.
+#[test]
+#[should_panic]
+fn test_claim_fails_when_contract_has_insufficient_balance() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    // Build a tree allocating 1000 to alice and 500 to bob.
+    let (root, alice_proof, bob_proof) =
+        build_two_leaf_tree(&env, &alice, 1000, &bob, 500);
+
+    // Deliberately initialise with only 1000 tokens — enough for alice only.
+    // This simulates an under-funded airdrop (or one where most tokens have
+    // already been claimed and the remainder is less than bob's allocation).
+    mint(&env, &token, &admin, &admin, 1000);
+    client.initialize(&admin, &token, &root, &1000, &DEFAULT_EXPIRATION);
+
+    // Alice claims successfully — contract balance is now 0.
+    client.claim(&alice, &1000, &alice_proof);
+    assert_eq!(TokenClient::new(&env, &token).balance(&alice), 1000);
+
+    // Bob's claim: proof is valid so the contract marks him as claimed, but the
+    // subsequent token transfer panics because the contract balance is 0.
+    // The #[should_panic] attribute on this test asserts that the host panics
+    // rather than silently succeeding, ensuring claimants are never silently
+    // short-changed.
+    client.claim(&bob, &500, &bob_proof);
 }
