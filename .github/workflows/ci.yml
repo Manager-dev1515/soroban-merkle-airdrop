@@ -52,6 +52,24 @@ jobs:
           if-no-files-found: warn
       - name: Build WASM
         run: cargo build --manifest-path contracts/airdrop/Cargo.toml --target wasm32v1-none --release
+      - name: Report WASM size
+        run: |
+          WASM=target/wasm32v1-none/release/soroban_merkle_airdrop.wasm
+          SIZE_BYTES=$(wc -c < "$WASM")
+          SIZE_KB=$(echo "scale=2; $SIZE_BYTES / 1024" | bc)
+          echo "WASM size: ${SIZE_BYTES} bytes (${SIZE_KB} KB)"
+          if [ "$SIZE_BYTES" -gt 65536 ]; then
+            echo "::warning::WASM binary exceeds 64 KB (${SIZE_BYTES} bytes / ${SIZE_KB} KB) — consider optimising"
+          fi
+          echo "## WASM Size Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Bytes | KB |" >> $GITHUB_STEP_SUMMARY
+          echo "| ---- | ----: | --: |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`soroban_merkle_airdrop.wasm\` | ${SIZE_BYTES} | ${SIZE_KB} |" >> $GITHUB_STEP_SUMMARY
+          if [ "$SIZE_BYTES" -gt 65536 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> ⚠️ **Warning:** WASM exceeds 64 KB limit (${SIZE_KB} KB). This increases deployment cost." >> $GITHUB_STEP_SUMMARY
+          fi
 
   sdk:
     name: SDK + CLI (TypeScript)
