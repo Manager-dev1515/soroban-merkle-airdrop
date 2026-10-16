@@ -52,6 +52,7 @@ export const statusCommand = new Command("status")
 
       spinner.succeed("Contract status:");
       console.log(`\n  ${chalk.bold("Contract:")}    ${chalk.cyan(contractId)}`);
+      console.log(`  ${chalk.bold("Explorer:")}    ${chalk.cyan(`https://stellar.expert/explorer/${network}/contract/${contractId}`)}`);
       console.log(`  ${chalk.bold("Network:")}     ${network}`);
       console.log(`  ${chalk.bold("Active:")}      ${active ? chalk.green("yes") : chalk.red("no")}`);
       console.log(`  ${chalk.bold("Root:")}        ${chalk.cyan(root ?? "not initialized")}`);
