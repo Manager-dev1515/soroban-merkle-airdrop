@@ -98,6 +98,22 @@ Navigate to the contract directory or run commands targeting the manifest path:
 
 ---
 
+## 🤖 Automated Dependency Updates
+
+This repository uses [Dependabot](https://docs.github.com/en/code-security/dependabot) to keep dependencies up to date automatically. Dependabot raises weekly pull requests for outdated packages across all workspaces:
+
+| Ecosystem | Directory | Schedule |
+|-----------|-----------|----------|
+| Cargo (Rust) | `contracts/airdrop/` | Weekly |
+| npm (SDK) | `sdk/` | Weekly |
+| npm (CLI) | `cli/` | Weekly |
+| npm (Web) | `web/` | Weekly |
+| GitHub Actions | `/` | Weekly |
+
+Dependabot PRs are labelled with `dependencies` and the relevant ecosystem tag (e.g. `rust` or `javascript`). Maintainers review and merge them as part of the normal PR process. If you introduce a new package dependency, Dependabot will automatically start tracking it on the next weekly run.
+
+---
+
 ## 🐛 Reporting Issues
 
 Please use the GitHub issue tracker. When filing a bug report, include:
