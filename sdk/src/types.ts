@@ -51,3 +51,26 @@ export interface ClaimResult {
   address: string;
   amount: bigint;
 }
+
+/**
+ * Result returned from `simulateClaim`.
+ * Contains the estimated fee and Soroban resource consumption — no transaction
+ * is submitted on-chain.
+ */
+export interface SimulateClaimResult {
+  /** Total estimated fee in stroops (base fee + resource fee). */
+  fee: string;
+  /** Soroban resource consumption details from the simulation footprint. */
+  resources: {
+    /** Number of CPU instructions consumed. */
+    instructions?: number;
+    /** Bytes read from ledger. */
+    readBytes?: number;
+    /** Bytes written to ledger. */
+    writeBytes?: number;
+    /** Number of read-only ledger entries accessed. */
+    readEntries?: number;
+    /** Number of read-write ledger entries accessed. */
+    writeEntries?: number;
+  };
+}

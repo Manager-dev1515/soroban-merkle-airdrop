@@ -3,6 +3,9 @@
  *
  * Submit a claim transaction for a given address using the Merkle proof
  * from the generated tree JSON.
+ *
+ * Use `--dry-run` to simulate the transaction and print the estimated fee
+ * without submitting anything on-chain.
  */
 
 import { Command } from "commander";
@@ -17,11 +20,16 @@ export const claimCommand = new Command("claim")
   .requiredOption("-t, --tree <file>", "Merkle tree JSON (output of generate)")
   .requiredOption("-a, --address <address>", "Address to claim for")
   .option("-k, --secret-key <key>", "Stellar secret key (or set STELLAR_SECRET_KEY)")
+  .option(
+    "--dry-run",
+    "Simulate the claim and print the estimated fee without submitting"
+  )
   .action(async (opts, cmd) => {
     const globalOpts = cmd.parent?.opts() ?? {};
     const network = globalOpts.network ?? "testnet";
     const contractId = globalOpts.contractId ?? process.env.AIRDROP_CONTRACT_ID;
     const secretKey = opts.secretKey ?? process.env.STELLAR_SECRET_KEY;
+    const isDryRun: boolean = !!opts.dryRun;
 
     if (!contractId) {
       console.error(chalk.red("Error: --contract-id or AIRDROP_CONTRACT_ID required"));
@@ -63,6 +71,40 @@ export const claimCommand = new Command("claim")
         process.exit(0);
       }
 
+      // ── Dry-run mode: simulate and print fee estimate, then exit ──────────
+      if (isDryRun) {
+        spinner.text = "Simulating claim transaction (dry run)...";
+
+        // simulateClaim takes the public key, not the secret key
+        const { Keypair } = await import("@stellar/stellar-sdk");
+        const publicKey = Keypair.fromSecret(secretKey).publicKey();
+
+        const sim = await client.simulateClaim(proof, publicKey);
+
+        spinner.succeed(chalk.cyan("Dry-run simulation complete (no transaction submitted)"));
+        console.log(`\n  ${chalk.bold("Estimated fee:")} ${chalk.yellow(sim.fee)} stroops`);
+
+        if (sim.resources && Object.keys(sim.resources).length > 0) {
+          console.log(`\n  ${chalk.bold("Resource usage:")}`);
+          const r = sim.resources;
+          if (r.instructions !== undefined)
+            console.log(`    Instructions: ${chalk.dim(r.instructions.toLocaleString())}`);
+          if (r.readBytes !== undefined)
+            console.log(`    Read bytes:   ${chalk.dim(r.readBytes.toLocaleString())}`);
+          if (r.writeBytes !== undefined)
+            console.log(`    Write bytes:  ${chalk.dim(r.writeBytes.toLocaleString())}`);
+          if (r.readEntries !== undefined)
+            console.log(`    Read entries: ${chalk.dim(r.readEntries)}`);
+          if (r.writeEntries !== undefined)
+            console.log(`    Write entries:${chalk.dim(r.writeEntries)}`);
+        }
+        console.log(
+          `\n  ${chalk.dim("Tip: remove --dry-run to submit the transaction for real.")}\n`
+        );
+        process.exit(0);
+      }
+
+      // ── Live mode: submit the transaction ─────────────────────────────────
       spinner.text = "Submitting claim transaction...";
       const result = await client.claim(proof, secretKey);
 
