@@ -10,7 +10,12 @@ import { readFile } from "fs/promises";
 import { resolve } from "path";
 import chalk from "chalk";
 import ora from "ora";
-import { createAirdropClient, verifyProof, NETWORKS } from "@soroban-merkle-airdrop/sdk";
+import {
+  createAirdropClient,
+  verifyProof,
+  NETWORKS,
+  validateMerkleTreeFile,
+} from "@soroban-merkle-airdrop/sdk";
 import { translateContractError } from "../errors.js";
 
 export const claimCommand = new Command("claim")
@@ -35,8 +40,18 @@ export const claimCommand = new Command("claim")
 
     const spinner = ora("Loading Merkle tree...").start();
     try {
-      const raw = JSON.parse(await readFile(resolve(opts.tree), "utf-8"));
-      const entry = raw.proofs[opts.address];
+      // Parse and validate the tree file schema.
+      let raw: unknown;
+      try {
+        raw = JSON.parse(await readFile(resolve(opts.tree), "utf-8"));
+      } catch (parseErr) {
+        spinner.fail(chalk.red(`Could not read/parse tree file: ${(parseErr as Error).message}`));
+        process.exit(1);
+      }
+
+      const tree = validateMerkleTreeFile(raw);
+
+      const entry = tree.proofs[opts.address];
       if (!entry) {
         spinner.fail(chalk.red(`Address ${opts.address} not found in airdrop list`));
         process.exit(1);
@@ -45,17 +60,14 @@ export const claimCommand = new Command("claim")
       const proof = { ...entry, amount: BigInt(entry.amount) };
 
       spinner.text = "Verifying proof locally...";
-      const valid = verifyProof(raw.root, proof.address, proof.amount, proof.proof);
+      const valid = verifyProof(tree.root, proof.address, proof.amount, proof.proof);
       if (!valid) {
         spinner.fail(chalk.red("Proof verification failed — tree may be corrupted"));
         process.exit(1);
       }
 
       const preset = NETWORKS[network];
-      const client = createAirdropClient({
-        ...preset,
-        contractId,
-      });
+      const client = createAirdropClient({ ...preset, contractId });
 
       spinner.text = "Checking claim status...";
       const already = await client.isClaimed(opts.address);
