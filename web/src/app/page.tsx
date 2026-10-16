@@ -8,7 +8,14 @@ export default function HomePage() {
         <h1 style={{ fontSize: 40, fontWeight: 800, marginBottom: 12 }}>
           Token Airdrop
         </h1>
-        <p style={{ color: "#aaa", fontSize: 18, maxWidth: 540, margin: "0 auto 32px" }}>
+        <p
+          style={{
+            color: "var(--text-muted)",
+            fontSize: 18,
+            maxWidth: 540,
+            margin: "0 auto 32px",
+          }}
+        >
           Check if your address is eligible and claim your tokens using a
           cryptographic Merkle proof — verified on-chain.
         </p>
@@ -17,8 +24,8 @@ export default function HomePage() {
           style={{
             display: "inline-block",
             padding: "14px 36px",
-            background: "#8ae4ff",
-            color: "#000",
+            background: "var(--accent)",
+            color: "var(--accent-fg)",
             fontWeight: 700,
             fontSize: 16,
             borderRadius: 10,
@@ -29,7 +36,14 @@ export default function HomePage() {
         </Link>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginTop: 48 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 20,
+          marginTop: 48,
+        }}
+      >
         {[
           {
             icon: "🌲",
@@ -47,10 +61,29 @@ export default function HomePage() {
             desc: "The contract tracks each claimed address. Once claimed, it cannot be claimed again.",
           },
         ].map(({ icon, title, desc }) => (
-          <div key={title} style={{ border: "1px solid #222", borderRadius: 12, padding: 24, background: "#111" }}>
+          <div
+            key={title}
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              padding: 24,
+              background: "var(--surface)",
+            }}
+          >
             <div style={{ fontSize: 28, marginBottom: 10 }}>{icon}</div>
-            <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700 }}>{title}</h3>
-            <p style={{ margin: 0, color: "#888", fontSize: 13, lineHeight: 1.6 }}>{desc}</p>
+            <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700 }}>
+              {title}
+            </h3>
+            <p
+              style={{
+                margin: 0,
+                color: "var(--text-muted)",
+                fontSize: 13,
+                lineHeight: 1.6,
+              }}
+            >
+              {desc}
+            </p>
           </div>
         ))}
       </div>
