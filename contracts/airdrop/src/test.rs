@@ -315,6 +315,74 @@ fn test_reclaim_before_expiration_fails() {
     assert_eq!(result, Err(Ok(AirdropError::NotYetExpired)));
 }
 
+// ─── Issue #129: Expiration boundary tests ─────────────────────────────────
+
+/// timestamp == expiration - 1 → one second before expiration → must fail with NotYetExpired.
+#[test]
+fn test_reclaim_at_expiration_minus_one_fails() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, 1000, &admin, 500);
+    mint(&env, &token, &admin, &admin, 1500);
+    client.initialize(&admin, &token, &root, &1500, &DEFAULT_EXPIRATION);
+
+    // One tick before the expiration boundary — reclaim must still be rejected.
+    env.ledger().set_timestamp(DEFAULT_EXPIRATION - 1);
+    let result = client.try_reclaim();
+    assert_eq!(
+        result,
+        Err(Ok(AirdropError::NotYetExpired)),
+        "reclaim at timestamp == expiration - 1 must return NotYetExpired"
+    );
+}
+
+/// timestamp == expiration → exactly at the expiration boundary → reclaim succeeds.
+#[test]
+fn test_reclaim_at_expiration_boundary_succeeds() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, 1000, &admin, 500);
+    mint(&env, &token, &admin, &admin, 1500);
+    client.initialize(&admin, &token, &root, &1500, &DEFAULT_EXPIRATION);
+
+    // Exactly at the expiration timestamp — the contract checks `timestamp < expiration`
+    // so timestamp == expiration must be treated as expired.
+    env.ledger().set_timestamp(DEFAULT_EXPIRATION);
+    let reclaimed = client.reclaim();
+    assert_eq!(reclaimed, 1500, "reclaim at timestamp == expiration must transfer all remaining tokens");
+    assert_eq!(
+        TokenClient::new(&env, &token).balance(&admin),
+        1500,
+        "admin must receive all reclaimed tokens"
+    );
+}
+
+/// timestamp == expiration + 1 → one second past expiration → reclaim succeeds.
+#[test]
+fn test_reclaim_at_expiration_plus_one_succeeds() {
+    let (env, admin, token, contract_id) = setup();
+    let client = AirdropContractClient::new(&env, &contract_id);
+    let claimant = Address::generate(&env);
+
+    let (root, _, _) = build_two_leaf_tree(&env, &claimant, 1000, &admin, 500);
+    mint(&env, &token, &admin, &admin, 1500);
+    client.initialize(&admin, &token, &root, &1500, &DEFAULT_EXPIRATION);
+
+    // One tick past the expiration boundary — reclaim must succeed.
+    env.ledger().set_timestamp(DEFAULT_EXPIRATION + 1);
+    let reclaimed = client.reclaim();
+    assert_eq!(reclaimed, 1500, "reclaim at timestamp == expiration + 1 must transfer all remaining tokens");
+    assert_eq!(
+        TokenClient::new(&env, &token).balance(&admin),
+        1500,
+        "admin must receive all reclaimed tokens"
+    );
+}
+
 #[test]
 fn test_double_initialize_fails() {
     let (env, admin, token, contract_id) = setup();
