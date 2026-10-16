@@ -252,12 +252,11 @@ export function createAirdropClient(config: NetworkConfig) {
    * console.log("Claimed in tx:", result.txHash);
    * ```
    */
-  async function claim(
+  async function buildClaimTx(
     claimProof: ClaimProof,
-    signerSecretKey: string
-  ): Promise<ClaimResult> {
-    const keypair = Keypair.fromSecret(signerSecretKey);
-    const sourceAccount = await server.getAccount(keypair.publicKey());
+    signerPublicKey: string
+  ) {
+    const sourceAccount = await server.getAccount(signerPublicKey);
 
     // Convert proof array of hex strings → ScVal vec of BytesN<32>
     const proofScVal = xdr.ScVal.scvVec(
@@ -274,13 +273,70 @@ export function createAirdropClient(config: NetworkConfig) {
       .addOperation(
         contractInst.call(
           "claim",
-          new Address(keypair.publicKey()).toScVal(),
+          new Address(signerPublicKey).toScVal(),
           nativeToScVal(claimProof.amount, { type: "i128" }),
           proofScVal
         )
       )
       .setTimeout(30)
       .build();
+
+    return tx;
+  }
+
+  /**
+   * Simulate a claim transaction and return the estimated fee and resource
+   * usage without submitting anything on-chain.
+   *
+   * @param claimProof      - The proof package from `buildMerkleTree`.
+   * @param signerPublicKey - The claimant's Stellar public key (G...).
+   * @returns               Fee estimate in stroops and Soroban resource details.
+   */
+  async function simulateClaim(
+    claimProof: ClaimProof,
+    signerPublicKey: string
+  ): Promise<SimulateClaimResult> {
+    const tx = await buildClaimTx(claimProof, signerPublicKey);
+
+    const simResult = await server.simulateTransaction(tx);
+    if (rpc.Api.isSimulationError(simResult)) {
+      throw new Error(`Simulation failed: ${simResult.error}`);
+    }
+
+    const successResult = simResult as rpc.Api.SimulateTransactionSuccessResponse;
+
+    // The minResourceFee from simulation is the Soroban resource fee.
+    // Add it to the base fee to get the total estimated fee.
+    const resourceFee = BigInt(successResult.minResourceFee ?? "0");
+    const baseFee = BigInt(BASE_FEE);
+    const totalFee = (baseFee + resourceFee).toString();
+
+    // Extract resource consumption details from the simulation footprint.
+    const resources = successResult.transactionData
+      ? extractResources(successResult.transactionData)
+      : {};
+
+    return {
+      fee: totalFee,
+      resources,
+    };
+  }
+
+  /**
+   * Submit a claim transaction.
+   *
+   * Internally reuses the same simulation logic as `simulateClaim` to avoid
+   * duplication — the simulation result is used to assemble the final tx.
+   *
+   * @param claimProof      - The proof package from `buildMerkleTree`.
+   * @param signerSecretKey - The claimant's Stellar secret key (S...).
+   */
+  async function claim(
+    claimProof: ClaimProof,
+    signerSecretKey: string
+  ): Promise<ClaimResult> {
+    const keypair = Keypair.fromSecret(signerSecretKey);
+    const tx = await buildClaimTx(claimProof, keypair.publicKey());
 
     const simResult = await server.simulateTransaction(tx);
     if (rpc.Api.isSimulationError(simResult)) {
@@ -492,6 +548,34 @@ export function createAirdropClient(config: NetworkConfig) {
       throw new RpcError(`Read simulation failed: ${simResult.error}`);
     }
     return (simResult as rpc.Api.SimulateTransactionSuccessResponse).result!.retval;
+  }
+
+  /**
+   * Extract a human-readable resource summary from the simulation's
+   * SorobanTransactionData XDR object.
+   */
+  function extractResources(
+    transactionData: rpc.Api.SimulateTransactionSuccessResponse["transactionData"]
+  ): SimulateClaimResult["resources"] {
+    try {
+      // transactionData may be an XDR object or base64 string depending on SDK version
+      const sorobanData =
+        typeof transactionData === "string"
+          ? xdr.SorobanTransactionData.fromXDR(transactionData, "base64")
+          : (transactionData as unknown as xdr.SorobanTransactionData);
+
+      const resources = sorobanData.resources();
+      return {
+        instructions: resources.instructions(),
+        readBytes: resources.readBytes(),
+        writeBytes: resources.writeBytes(),
+        readEntries: resources.footprint().readOnly().length,
+        writeEntries: resources.footprint().readWrite().length,
+      };
+    } catch {
+      // If extraction fails (e.g., SDK version differences), return an empty object
+      return {};
+    }
   }
 
   function sleep(ms: number): Promise<void> {
